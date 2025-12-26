@@ -9,8 +9,10 @@ class InterviewSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     start_time = Column(DateTime(timezone=True), server_default=func.now())
+    end_time = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, default="in_progress") # in_progress, completed
     score = Column(Integer, nullable=True)
+    session_metadata = Column(JSON, nullable=True) # For UI state like current question index or flags
 
     user = relationship("User", back_populates="interviews")
     questions = relationship("Question", back_populates="session")
@@ -32,6 +34,8 @@ class Answer(Base):
     id = Column(Integer, primary_key=True, index=True)
     question_id = Column(Integer, ForeignKey("questions.id"))
     user_audio_text = Column(Text, nullable=True) # The transcribed text
+    response_time_ms = Column(Integer, nullable=True) # Time taken to answer
+    edit_count = Column(Integer, default=0) # Number of edits made to text
     
     question = relationship("Question", back_populates="answer")
     feedback = relationship("Feedback", back_populates="answer", uselist=False)

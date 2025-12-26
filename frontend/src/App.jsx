@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Interview from './pages/Interview';
+import Report from './pages/Report';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicRoute from './components/PublicRoute';
 import Background3D from './components/Background3D';
@@ -54,6 +55,12 @@ function App() {
             <Route path="interview/:sessionId" element={
               <ProtectedRoute>
                 <PageWrapper><Interview /></PageWrapper>
+              </ProtectedRoute>
+            } />
+
+            <Route path="report/:sessionId" element={
+              <ProtectedRoute>
+                <PageWrapper><Report /></PageWrapper>
               </ProtectedRoute>
             } />
 

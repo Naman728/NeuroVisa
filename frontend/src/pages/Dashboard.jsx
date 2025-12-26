@@ -67,6 +67,14 @@ const Dashboard = () => {
     // Sort sessions for display (newest first)
     const sortedSessions = [...sessions].reverse();
 
+    const formatDuration = (start, end) => {
+        if (!end) return 'In Progress';
+        const durationMs = new Date(end) - new Date(start);
+        const minutes = Math.floor(durationMs / 60000);
+        const seconds = Math.floor((durationMs % 60000) / 1000);
+        return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    };
+
     return (
         <div className="space-y-8 pb-10">
             {/* Welcome Section with AI Insight */}
@@ -81,14 +89,22 @@ const Dashboard = () => {
                         The evaluator is ready for sync.
                     </p>
 
-                    <div className="flex gap-4 z-10">
+                    <div className="flex flex-wrap gap-4 z-10">
                         {stats.recentStatus === 'In Progress' ? (
-                            <PhysicsButton
-                                onClick={() => navigate(`/interview/${sessions[sessions.length - 1].id}`)}
-                                className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-4 rounded-2xl text-lg font-black transition-all shadow-xl shadow-orange-500/20 flex items-center gap-2"
-                            >
-                                <Smartphone size={22} /> RESUME PROTOCOL
-                            </PhysicsButton>
+                            <>
+                                <PhysicsButton
+                                    onClick={() => navigate(`/interview/${sessions[sessions.length - 1].id}`)}
+                                    className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-4 rounded-2xl text-lg font-black transition-all shadow-xl shadow-orange-500/20 flex items-center gap-2"
+                                >
+                                    <Smartphone size={22} /> RESUME PROTOCOL
+                                </PhysicsButton>
+                                <PhysicsButton
+                                    onClick={handleStartInterview}
+                                    className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl text-lg font-black transition-all border border-white/10 flex items-center gap-2 group"
+                                >
+                                    <Plus size={22} className="group-hover:rotate-90 transition-transform" /> NEW PROTOCOL
+                                </PhysicsButton>
+                            </>
                         ) : (
                             <PhysicsButton
                                 onClick={handleStartInterview}
@@ -155,8 +171,8 @@ const Dashboard = () => {
                         {sortedSessions.slice(0, 5).map(session => (
                             <div key={session.id} className="group bg-background p-4 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors flex justify-between items-center">
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${session.status === 'completed' ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400'}`}>
-                                        {session.status === 'completed' ? <CheckCircle size={20} /> : <Play size={20} />}
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${session.status === 'completed' ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400 animate-pulse'}`}>
+                                        {session.status === 'completed' ? <CheckCircle size={20} /> : <Play size={20} className="ml-1" />}
                                     </div>
                                     <div>
                                         <span className="font-semibold block text-gray-200">
@@ -164,23 +180,40 @@ const Dashboard = () => {
                                         </span>
                                         <span className="text-sm text-gray-500">
                                             {new Date(session.start_time).toLocaleDateString()} • {new Date(session.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            {session.end_time && ` • Duration: ${formatDuration(session.start_time, session.end_time)}`}
                                         </span>
                                     </div>
                                 </div>
 
                                 <div className="flex items-center gap-6">
-                                    {session.status === 'completed' && (
-                                        <div className="text-right">
-                                            <span className="block text-xs text-gray-400 uppercase">Score</span>
-                                            <span className={`font-bold ${session.score >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
-                                                {session.score || 0}%
-                                            </span>
-                                        </div>
+                                    {session.status === 'completed' ? (
+                                        <>
+                                            <div className="text-right">
+                                                <span className="block text-xs text-gray-400 uppercase">Score</span>
+                                                <span className={`font-bold ${session.score >= 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                                    {session.score || 0}%
+                                                </span>
+                                            </div>
+                                            <PhysicsButton
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/report/${session.id}`); }}
+                                                className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-all border border-primary/20"
+                                                title="View Detailed Report"
+                                            >
+                                                <FileText size={18} />
+                                            </PhysicsButton>
+                                        </>
+                                    ) : (
+                                        <PhysicsButton
+                                            onClick={(e) => { e.stopPropagation(); navigate(`/interview/${session.id}`); }}
+                                            className="bg-blue-500/10 text-blue-400 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/20 hover:bg-blue-500/20 transition-all"
+                                        >
+                                            RESUME
+                                        </PhysicsButton>
                                     )}
 
                                     <button
-                                        onClick={() => navigate(`/interview/${session.id}`)}
-                                        className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-colors"
+                                        onClick={() => navigate(session.status === 'completed' ? `/report/${session.id}` : `/interview/${session.id}`)}
+                                        className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-colors"
                                     >
                                         <ArrowRight size={16} />
                                     </button>

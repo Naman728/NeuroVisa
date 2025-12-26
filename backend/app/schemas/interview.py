@@ -20,6 +20,8 @@ class Question(QuestionBase):
 # Answer Schemas
 class AnswerBase(BaseModel):
     user_audio_text: str
+    response_time_ms: Optional[int] = None
+    edit_count: Optional[int] = 0
 
 class AnswerCreate(AnswerBase):
     question_id: int
@@ -55,8 +57,10 @@ class InterviewSession(InterviewSessionBase):
     id: int
     user_id: int
     start_time: datetime
+    end_time: Optional[datetime] = None
     status: str
     score: Optional[int] = None
+    session_metadata: Optional[Any] = None
     questions: List[Question] = []
 
     class Config:

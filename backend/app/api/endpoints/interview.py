@@ -19,6 +19,27 @@ def start_interview(
     """
     Start a new interview session.
     """
+    # If there's an existing in-progress session, end it first
+    active_session = db.query(InterviewSession).filter(
+        InterviewSession.user_id == current_user.id,
+        InterviewSession.status == "in_progress"
+    ).first()
+    
+    if active_session:
+        active_session.status = "completed"
+        active_session.end_time = datetime.now()
+        # Calculate average score for the abandoned session if possible
+        answers = db.query(Answer).join(Question).filter(Question.session_id == active_session.id).all()
+        total_score = 0
+        count = 0
+        for a in answers:
+            if a.feedback:
+                total_score += a.feedback.score
+                count += 1
+        if count > 0:
+            active_session.score = total_score // count
+        db.add(active_session)
+
     # Create Session
     session = InterviewSession(user_id=current_user.id, status="in_progress")
     db.add(session)
@@ -97,7 +118,9 @@ def submit_answer(
     # Save Answer
     answer = Answer(
         question_id=answer_in.question_id,
-        user_audio_text=answer_in.user_audio_text
+        user_audio_text=answer_in.user_audio_text,
+        response_time_ms=answer_in.response_time_ms,
+        edit_count=answer_in.edit_count
     )
     db.add(answer)
     db.commit()
@@ -136,6 +159,7 @@ def complete_interview(
         raise HTTPException(status_code=404, detail="Interview session not found")
     
     session.status = "completed"
+    session.end_time = datetime.now()
     
     # Calculate average score
     answers = db.query(Answer).join(Question).filter(Question.session_id == session.id).all()
