@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-neutral-100 font-sans selection:bg-primary/30;
+    background-image:
+      radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
+      radial-gradient(at 50% 0%, hsla(225, 39%, 10%, 1) 0, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(339, 49%, 15%, 1) 0, transparent 50%);
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-glass;
+  }
+
+  .glass-dark {
+    @apply bg-surface/80 backdrop-blur-2xl border border-white/5 shadow-2xl;
+  }
+
+  .neon-border {
+    @apply border border-primary/30 hover:border-primary/60 transition-colors shadow-neon-cyan;
+  }
+
+  .text-glow-cyan {
+    text-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+  }
+
+  .text-glow-purple {
+    text-shadow: 0 0 10px rgba(112, 0, 255, 0.4);
+  }
+}
