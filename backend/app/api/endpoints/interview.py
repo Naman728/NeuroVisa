@@ -1,7 +1,7 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.api import deps
 from app.models.interview import InterviewSession, Question, Answer, Feedback
@@ -10,6 +10,12 @@ from app.schemas import interview as interview_schema
 from app.services.ai_service import ai_service
 
 router = APIRouter()
+
+from fastapi import Body
+from pydantic import BaseModel
+class SessionCompleteSchema(BaseModel):
+    status: Optional[str] = "completed"
+    total_duration: Optional[int] = None
 
 @router.post("/start", response_model=interview_schema.InterviewSession)
 def start_interview(
@@ -26,18 +32,18 @@ def start_interview(
     ).first()
     
     if active_session:
-        active_session.status = "completed"
-        active_session.end_time = datetime.now()
+        active_session.status = "interrupted"
+        active_session.end_time = datetime.now(timezone.utc)
+        # Ensure start_time is treated as UTC for subtraction
+        start_time = active_session.start_time
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        active_session.total_duration = int((active_session.end_time - start_time).total_seconds())
         # Calculate average score for the abandoned session if possible
         answers = db.query(Answer).join(Question).filter(Question.session_id == active_session.id).all()
-        total_score = 0
-        count = 0
-        for a in answers:
-            if a.feedback:
-                total_score += a.feedback.score
-                count += 1
-        if count > 0:
-            active_session.score = total_score // count
+        scores = [a.feedback.score for a in answers if a.feedback and a.feedback.score is not None]
+        if scores:
+            active_session.score = sum(scores) // len(scores)
         db.add(active_session)
 
     # Create Session
@@ -95,7 +101,29 @@ def get_interview_session(
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
-    return session
+    
+    # Section 3, Item 10: Generate improvement plan for completed sessions
+    session_dict = {
+        "id": session.id,
+        "score": session.score,
+        "status": session.status
+    }
+    
+    improvement_plan = None
+    if session.status == "completed":
+        improvement_plan = ai_service.generate_improvement_plan(session_dict)
+        
+    return {
+        "id": session.id,
+        "user_id": session.user_id,
+        "start_time": session.start_time,
+        "end_time": session.end_time,
+        "status": session.status,
+        "score": session.score,
+        "session_metadata": session.session_metadata,
+        "questions": session.questions,
+        "improvement_plan": improvement_plan
+    }
 
 @router.post("/answer", response_model=interview_schema.Answer)
 def submit_answer(
@@ -127,12 +155,17 @@ def submit_answer(
     db.refresh(answer)
     
     # Generate Feedback
-    evaluation = ai_service.evaluate_answer(question.text, answer.user_audio_text)
+    evaluation = ai_service.evaluate_answer(
+        question.text, 
+        answer.user_audio_text,
+        stress_mode=answer_in.stress_mode,
+        personality=answer_in.officer_personality
+    )
     
     # Save Feedback
     feedback = Feedback(
         answer_id=answer.id,
-        evaluation_json=evaluation["metrics"],
+        evaluation_json=evaluation, # Save entire evaluation dict
         score=evaluation["score"]
     )
     db.add(feedback)
@@ -145,6 +178,7 @@ def submit_answer(
 @router.post("/{session_id}/complete")
 def complete_interview(
     session_id: int,
+    session_data: Optional[SessionCompleteSchema] = Body(None),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -158,20 +192,26 @@ def complete_interview(
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found")
     
-    session.status = "completed"
-    session.end_time = datetime.now()
+    session.status = (session_data.status if session_data and session_data.status else "completed")
+    session.end_time = datetime.now(timezone.utc)
     
-    # Calculate average score
+    if session_data and session_data.total_duration is not None:
+        session.total_duration = int(session_data.total_duration)
+    else:
+        # Ensure start_time is treated as UTC for subtraction
+        start_time = session.start_time
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        session.total_duration = int((session.end_time - start_time).total_seconds())
+    
+    # Calculate average score with safety
     answers = db.query(Answer).join(Question).filter(Question.session_id == session.id).all()
-    total_score = 0
-    count = 0
-    for a in answers:
-        if a.feedback:
-            total_score += a.feedback.score
-            count += 1
-            
-    if count > 0:
-        session.score = total_score // count
+    scores = [a.feedback.score for a in answers if a.feedback and a.feedback.score is not None]
+    
+    if scores:
+        session.score = sum(scores) // len(scores)
+    else:
+        session.score = 0
     
     db.commit()
     return {"status": "completed", "final_score": session.score}

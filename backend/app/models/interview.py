@@ -10,7 +10,8 @@ class InterviewSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     start_time = Column(DateTime(timezone=True), server_default=func.now())
     end_time = Column(DateTime(timezone=True), nullable=True)
-    status = Column(String, default="in_progress") # in_progress, completed
+    total_duration = Column(Integer, nullable=True) # Duration in seconds
+    status = Column(String, default="in_progress") # in_progress, completed, ended_by_user, interrupted
     score = Column(Integer, nullable=True)
     session_metadata = Column(JSON, nullable=True) # For UI state like current question index or flags
 

@@ -22,6 +22,8 @@ class AnswerBase(BaseModel):
     user_audio_text: str
     response_time_ms: Optional[int] = None
     edit_count: Optional[int] = 0
+    stress_mode: Optional[bool] = False
+    officer_personality: Optional[str] = "Neutral" # Neutral, Strict, Friendly
 
 class AnswerCreate(AnswerBase):
     question_id: int
@@ -58,10 +60,12 @@ class InterviewSession(InterviewSessionBase):
     user_id: int
     start_time: datetime
     end_time: Optional[datetime] = None
+    total_duration: Optional[int] = None
     status: str
     score: Optional[int] = None
     session_metadata: Optional[Any] = None
     questions: List[Question] = []
+    improvement_plan: Optional[Any] = None
 
     class Config:
         orm_mode = True

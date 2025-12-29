@@ -13,7 +13,8 @@ import {
     AlertCircle,
     CheckCircle2,
     Activity,
-    ShieldCheck
+    ShieldCheck,
+    FileText
 } from 'lucide-react';
 import {
     ResponsiveContainer,
@@ -71,33 +72,43 @@ const Report = () => {
 
     if (!session) return <div className="p-10 text-center">Protocol data not found.</div>;
 
-    // Data Transformation for Charts
-    const confidenceTrendData = session.questions.map((q, i) => ({
+    // Data Transformation for Charts with Safety Guard
+    const questions = session?.questions || [];
+    const questionCount = questions.length || 1; // Avoid division by zero
+
+    const confidenceTrendData = questions.map((q, i) => ({
         index: i + 1,
-        score: q.answer?.feedback?.score || 0
+        score: q.answer?.feedback?.score !== null && q.answer?.feedback?.score !== undefined ? q.answer.feedback.score : 0
     }));
 
-    const responseTimeData = session.questions.map((q, i) => ({
+    const responseTimeData = questions.map((q, i) => ({
         index: i + 1,
         time: (q.answer?.response_time_ms || 0) / 1000,
         edits: q.answer?.edit_count || 0
     }));
 
     const skillData = [
-        { subject: 'Clarity', A: session.questions.reduce((acc, q) => acc + (q.answer?.feedback?.evaluation_json?.metrics?.clarity === 'High' ? 100 : 60), 0) / session.questions.length },
+        { subject: 'Clarity', A: questions.reduce((acc, q) => acc + (q.answer?.feedback?.evaluation_json?.metrics?.clarity === 'High' ? 100 : 60), 0) / questionCount },
         { subject: 'Consistency', A: session.score || 0 },
         { subject: 'Logic', A: (session.score || 0) * 0.9 },
         { subject: 'Intent', A: Math.max(70, session.score || 0) },
-        { subject: 'Vocal Stability', A: session.questions.reduce((acc, q) => acc + (q.answer?.feedback?.evaluation_json?.metrics?.confidence === 'High' ? 100 : 70), 0) / session.questions.length },
+        { subject: 'Vocal Stability', A: questions.reduce((acc, q) => acc + (q.answer?.feedback?.evaluation_json?.metrics?.confidence === 'High' ? 100 : 70), 0) / questionCount },
     ];
 
     const pieData = [
-        { name: 'Optimal', value: session.questions.filter(q => (q.answer?.feedback?.score || 0) > 80).length },
-        { name: 'Stable', value: session.questions.filter(q => (q.answer?.feedback?.score || 0) <= 80 && (q.answer?.feedback?.score || 0) > 60).length },
-        { name: 'Calibrating', value: session.questions.filter(q => (q.answer?.feedback?.score || 0) <= 60).length },
+        { name: 'Optimal', value: questions.filter(q => (q.answer?.feedback?.score || 0) > 80).length },
+        { name: 'Stable', value: questions.filter(q => (q.answer?.feedback?.score || 0) <= 80 && (q.answer?.feedback?.score || 0) > 60).length },
+        { name: 'Calibrating', value: questions.filter(q => (q.answer?.feedback?.score || 0) <= 60).length },
     ];
 
     const COLORS = ['#00f2fe', '#8b5cf6', '#f59e0b'];
+
+    const formatDuration = (seconds) => {
+        if (!seconds) return "0s";
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    };
 
     const handleDownload = () => {
         window.print(); // Simple but effective for a hackathon
@@ -158,9 +169,9 @@ const Report = () => {
                     <StatBox icon={<Target className="text-primary" />} label="Avg Clarity" value="High Stability" />
                     <StatBox icon={<Activity className="text-secondary" />} label="Vocal Confidence" value="Consistent" />
                     <StatBox icon={<TrendingUp className="text-green-400" />} label="Logic Coherence" value="Optimal" />
-                    <StatBox icon={<Clock className="text-accent" />} label="Avg Response" value="12.4s" />
-                    <StatBox icon={<ShieldCheck className="text-primary" />} label="Risk Profile" value="Minimal" />
-                    <StatBox icon={<Zap className="text-yellow-400" />} label="AI Assessment" value="AUTHORIZED" />
+                    <StatBox icon={<Clock className="text-accent" />} label="Total Duration" value={formatDuration(session.total_duration)} />
+                    <StatBox icon={<ShieldCheck className="text-primary" />} label="Session Status" value={session.status === 'ended_by_user' ? 'Manual Exit' : 'Completed'} />
+                    <StatBox icon={<Zap className="text-yellow-400" />} label="AI Assessment" value={session.status === 'interrupted' ? 'PENDING' : 'AUTHORIZED'} />
                 </div>
             </div>
 
@@ -262,46 +273,135 @@ const Report = () => {
                 </GlassCard>
             </div>
 
-            {/* Qualitative Feedback Section */}
-            <div className="grid md:grid-cols-2 gap-8">
-                <div className="bg-green-500/5 border border-green-500/10 p-10 rounded-[2.5rem] space-y-6">
-                    <h3 className="text-sm font-black text-green-400 uppercase tracking-widest flex items-center gap-2">
-                        <CheckCircle2 size={16} /> Key Neural Strengths
-                    </h3>
-                    <ul className="space-y-4">
-                        {[
-                            "High logical coherence in articulating professional intent.",
-                            "Strong vocal stability during high-impact inquiries.",
-                            "Consistent financial narrative across all response nodes.",
-                            "Optimal clarity on return ties to home country."
-                        ].map((s, i) => (
-                            <li key={i} className="flex items-start gap-4 text-sm text-neutral-300">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0" />
-                                {s}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+            {/* AI Improvement Plan (Section 3, Item 10) */}
+            {session.improvement_plan && (
+                <div className="grid md:grid-cols-2 gap-8">
+                    <div className="bg-primary/5 border border-primary/10 p-10 rounded-[2.5rem] space-y-6">
+                        <h3 className="text-sm font-black text-primary uppercase tracking-widest flex items-center gap-2">
+                            <Brain size={16} /> Targeted Weaknesses
+                        </h3>
+                        <ul className="space-y-4">
+                            {session.improvement_plan.top_weaknesses.map((w, i) => (
+                                <li key={i} className="flex items-start gap-4 text-sm text-neutral-300">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0 shadow-[0_0_8px_rgba(0,242,254,0.8)]" />
+                                    {w}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
 
-                <div className="bg-yellow-500/5 border border-yellow-500/10 p-10 rounded-[2.5rem] space-y-6">
-                    <h3 className="text-sm font-black text-yellow-500 uppercase tracking-widest flex items-center gap-2">
-                        <AlertCircle size={16} /> Optimization Nodes (Improvements)
-                    </h3>
-                    <ul className="space-y-4">
-                        {[
-                            "Reduce hesitation on financial specific inquiries.",
-                            "Provide more granular detail regarding travel itinerary.",
-                            "Maintain eye contact (Simulated) during complex logic chains.",
-                            "Elaborate on specific professional responsibilities."
-                        ].map((s, i) => (
-                            <li key={i} className="flex items-start gap-4 text-sm text-neutral-300">
-                                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 mt-2 shrink-0" />
-                                {s}
-                            </li>
-                        ))}
-                    </ul>
+                    <div className="bg-accent/5 border border-accent/10 p-10 rounded-[2.5rem] space-y-6">
+                        <h3 className="text-sm font-black text-accent uppercase tracking-widest flex items-center gap-2">
+                            <Zap size={16} /> Recommended Practice
+                        </h3>
+                        <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                            <span className="text-[10px] font-black uppercase text-neutral-500 block mb-2">Focus Area</span>
+                            <span className="text-sm font-bold text-white">{session.improvement_plan.practice_focus}</span>
+                        </div>
+                        <div className="space-y-4">
+                            <span className="text-[10px] font-black uppercase text-neutral-500 block">Sample Optimization</span>
+                            {session.improvement_plan.improved_answers.map((ans, i) => (
+                                <div key={i} className="text-[11px] leading-relaxed">
+                                    <div className="text-red-400 opacity-60 mb-1">✕ {ans.original}</div>
+                                    <div className="text-green-400 font-bold">✓ {ans.improved}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Transcript Analysis (Section 3, Item 8) */}
+            <div className="space-y-6">
+                <h3 className="text-xl font-black text-white tracking-tight uppercase flex items-center gap-3">
+                    <FileText size={20} className="text-primary" /> Session Transcript Analysis
+                </h3>
+                <div className="space-y-4">
+                    {questions.map((q, i) => (
+                        <GlassCard key={i} className="p-6 overflow-hidden">
+                            <div className="flex justify-between items-start mb-6">
+                                <div className="space-y-1">
+                                    <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Question {i + 1}</span>
+                                    <h4 className="text-sm font-bold text-white">{q.text}</h4>
+                                </div>
+                                <div className={`text-xs font-black px-3 py-1 rounded-full ${q.answer?.feedback?.score > 75 ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-500'}`}>
+                                    {q.answer?.feedback?.score || 0}% ACCURACY
+                                </div>
+                            </div>
+
+                            <div className="bg-background/60 rounded-xl p-4 border border-white/5">
+                                <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest block mb-2">Transcript & AI Highlights</span>
+                                <p className="text-sm text-neutral-300 leading-relaxed italic">
+                                    {/* Simple word-based highlighting logic */}
+                                    {q.answer?.user_audio_text ? (
+                                        q.answer.user_audio_text.split(' ').map((word, idx) => {
+                                            const lower = word.toLowerCase();
+                                            const riskWords = ['stay', 'forever', 'job', 'work', 'boyfriend', 'boyfriend'];
+                                            const isRisk = riskWords.some(r => lower.includes(r));
+                                            return (
+                                                <span key={idx} className={isRisk ? 'text-red-400 font-black underline decoration-red-500/50' : ''}>
+                                                    {word}{' '}
+                                                </span>
+                                            );
+                                        })
+                                    ) : (
+                                        "No response recorded."
+                                    )}
+                                </p>
+                            </div>
+
+                            {q.answer?.feedback?.feedback && (
+                                <div className="mt-4 flex gap-3 items-start">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                                    <p className="text-[11px] text-neutral-400 font-medium">{q.answer.feedback.feedback}</p>
+                                </div>
+                            )}
+                        </GlassCard>
+                    ))}
                 </div>
             </div>
+
+            {/* Potential Concern Simulator (Section 4, Item 12) */}
+            <GlassCard className="p-10 border-red-500/20 bg-red-500/5 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                    <ShieldCheck size={120} className="text-red-500" />
+                </div>
+                <div className="relative z-10">
+                    <h3 className="text-xl font-black text-white tracking-tight uppercase flex items-center gap-3 mb-6">
+                        <AlertCircle size={20} className="text-red-500" /> Consular Sentiment Simulation
+                    </h3>
+                    <p className="text-sm text-neutral-400 max-w-2xl mb-8">
+                        The following points represent potential areas of inquiry a consular officer may revisit based on detected neural patterns. This is for preparation purposes and does not indicate final status.
+                    </p>
+                    <div className="grid md:grid-cols-2 gap-8">
+                        <div className="space-y-4">
+                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block">Likely Inquiry Nodes</span>
+                            <div className="space-y-3">
+                                {[
+                                    "Deep-dive into specific project technicalities.",
+                                    "Verification of family ties and property ownership.",
+                                    "Cross-referencing of stated itinerary with financial capacity."
+                                ].map((p, i) => (
+                                    <div key={i} className="flex gap-3 text-xs text-neutral-300 bg-white/5 p-3 rounded-lg border border-white/5">
+                                        <div className="w-1 h-1 rounded-full bg-red-400 mt-1.5" />
+                                        {p}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <span className="text-[10px] font-black text-green-400 uppercase tracking-widest block">Risk Mitigation Strategy</span>
+                            <p className="text-xs text-neutral-400 leading-relaxed italic">
+                                "The simulated sentiment suggests maintaining a focus on 'Intent to Return'. Ensure you have physical copies of your property deeds or employment contract if these nodes are triggered."
+                            </p>
+                            <div className="mt-4 p-4 border border-blue-500/20 bg-blue-500/5 rounded-xl">
+                                <span className="text-[8px] font-bold text-blue-400 uppercase block mb-1">Ethical Note</span>
+                                <p className="text-[9px] text-blue-300/60">Final results always depend on the human officer. This simulation is a training tool to improve your articulation and confidence.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </GlassCard>
 
             {/* Bottom CTA */}
             <div className="flex justify-center pt-10">
@@ -309,7 +409,7 @@ const Report = () => {
                     onClick={() => navigate('/dashboard')}
                     className="bg-white text-background px-12 py-5 rounded-[2.5rem] font-black uppercase tracking-[0.3em] hover:shadow-[0_0_30px_rgba(255,255,255,0.2)]"
                 >
-                    Finalize Session Archive
+                    Finalize Archive & Exit
                 </PhysicsButton>
             </div>
         </div>

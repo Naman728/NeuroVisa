@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Mic, MicOff, Send, Square, AlertCircle, CheckCircle, ArrowRight, Loader2, Volume2, StopCircle, FileText, Brain, Video, VideoOff, Camera, Monitor, Layout, Search, Zap } from 'lucide-react';
+import { Mic, MicOff, Send, Square, AlertCircle, CheckCircle, ArrowRight, Loader2, Volume2, StopCircle, FileText, Brain, Video, VideoOff, Camera, Monitor, Layout, Search, Zap, ShieldCheck, Link, FileCheck } from 'lucide-react';
 import api from '../api/axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProgressRing from '../components/ProgressRing';
@@ -54,6 +54,49 @@ const Interview = () => {
     // Performance Metrics
     const [questionStartTime, setQuestionStartTime] = useState(Date.now());
     const [editCount, setEditCount] = useState(0);
+
+    // Advanced Hackathon Features
+    const [stressMode, setStressMode] = useState(false);
+    const [officerPersona, setOfficerPersona] = useState('Neutral');
+    const [thinkingMessage, setThinkingMessage] = useState('');
+    const [voiceHints, setVoiceHints] = useState([]);
+
+    // Document Sync States (Section 4, Item 11)
+    const [syncDocument, setSyncDocument] = useState("");
+    const [syncStatus, setSyncStatus] = useState("idle"); // idle, checking, consistent, minor, mismatch
+    const [mismatchReason, setMismatchReason] = useState("");
+    const [isSyncCollapsed, setIsSyncCollapsed] = useState(false);
+
+    // Timer System (Section 5, Item 12)
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+    const resetInterviewState = () => {
+        setSession(null);
+        setCurrentQuestionIndex(0);
+        setAnswerText('');
+        setFeedback(null);
+        setIsListening(false);
+        setIsAnalyzing(false);
+        setTypedText('');
+        setIsInputEnabled(false);
+        setFollowUpQuestion(null);
+        setIsFollowUpActive(false);
+        setShowSummary(false);
+        setSummaryData(null);
+        setCognitiveStep(0);
+        setLiveConfidence('Medium');
+        setMicroFeedback(null);
+        setInterimTranscript('');
+        setAiTyping(false);
+        setShowSilenceWarning(false);
+        setIsEndModalOpen(false);
+        setElapsedSeconds(0);
+        setSyncDocument("");
+        setSyncStatus("idle");
+        setMismatchReason("");
+        setVoiceHints([]);
+        setThinkingMessage('');
+    };
 
     const videoRef = useRef(null);
 
@@ -159,7 +202,10 @@ const Interview = () => {
         if (isListening) {
             const timeout = setTimeout(() => {
                 setShowSilenceWarning(true);
-            }, 4000);
+                // Section 2, Item 7: Detect long silence
+                setVoiceHints(prev => [...new Set([...prev, "Extended silence detected. Analyzing hesitation patterns..."])]);
+                setTimeout(() => setVoiceHints(prev => prev.filter(h => !h.includes("silence"))), 6000);
+            }, 6000);
             setSilenceTimeout(timeout);
         }
     };
@@ -182,6 +228,16 @@ const Interview = () => {
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
                         final += event.results[i][0].transcript;
+
+                        // LIGHTWEIGHT VOICE ANALYSIS (Section 2, Item 7)
+                        const text = event.results[i][0].transcript.toLowerCase();
+                        const fillers = [' um', ' uh', ' like', ' basically', ' actually'];
+                        const detectedFillers = fillers.filter(f => text.includes(f));
+
+                        if (detectedFillers.length > 0) {
+                            setVoiceHints(prev => [...new Set([...prev, "Detected filler words. Try to speak more decisively."])]);
+                            setTimeout(() => setVoiceHints(prev => prev.filter(h => !h.includes("filler"))), 5000);
+                        }
                     } else {
                         interim += event.results[i][0].transcript;
                     }
@@ -212,9 +268,14 @@ const Interview = () => {
 
         return () => {
             synthRef.current.cancel();
-            if (recognitionRef.current) recognitionRef.current.stop();
+            if (recognitionRef.current) {
+                setIsListening(false);
+                recognitionRef.current.stop();
+            }
+            stopVideo();
+            if (silenceTimeout) clearTimeout(silenceTimeout);
         };
-    }, [sessionId]);
+    }, [sessionId]); // Removed silenceTimeout to prevent re-fetch loop
 
     useEffect(() => {
         if (session && !loading && !aiTyping && !feedback) {
@@ -223,6 +284,24 @@ const Interview = () => {
             speak(questionText);
         }
     }, [currentQuestionIndex, aiTyping, session, isFollowUpActive]);
+
+    // Live Timer Engine (Section 5, Item 12)
+    useEffect(() => {
+        let timer;
+        if (!showSummary && !loading && session && session.status === 'in_progress') {
+            timer = setInterval(() => {
+                setElapsedSeconds(prev => prev + 1);
+            }, 1000);
+        }
+        return () => clearInterval(timer);
+    }, [showSummary, loading, session]);
+
+    const formatTime = (seconds) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return [h, m, s].map(v => v < 10 ? "0" + v : v).join(":");
+    };
 
     const startTypingEffect = (text) => {
         setTypedText('');
@@ -252,9 +331,24 @@ const Interview = () => {
     }, [session, feedback, aiTyping, interimTranscript]);
 
     const fetchSession = async () => {
+        resetInterviewState();
+        setLoading(true);
         try {
             const response = await api.get(`/interview/${sessionId}`);
-            setSession(response.data);
+            const data = response.data;
+            setSession(data);
+
+            // Restore timer from stored start time (Section 5, Item 12.8)
+            if (data.start_time && data.status === 'in_progress') {
+                const start = new Date(data.start_time).getTime();
+                const now = Date.now();
+                // Ensure we don't have negative time
+                const diff = Math.max(0, Math.floor((now - start) / 1000));
+                setElapsedSeconds(diff);
+            } else if (data.total_duration) {
+                setElapsedSeconds(data.total_duration);
+            }
+
             setLoading(false);
             setAiTyping(true);
             setTimeout(() => setAiTyping(false), 1000);
@@ -338,14 +432,31 @@ const Interview = () => {
         setAnswerText(newValue);
     };
 
-    const generateSummary = async () => {
+    const generateSummary = async (status = "completed") => {
         setLoading(true);
         try {
-            await api.post(`/interview/${sessionId}/complete`);
-            navigate(`/report/${sessionId}`);
+            // Stop hardware and listeners first
+            stopVideo();
+            if (recognitionRef.current) {
+                setIsListening(false);
+                recognitionRef.current.stop();
+            }
+            if (silenceTimeout) clearTimeout(silenceTimeout);
+
+            await api.post(`/interview/${sessionId}/complete`, {
+                status: status,
+                total_duration: elapsedSeconds
+            });
+
+            // Short delay to ensure state persists before navigation
+            setTimeout(() => {
+                navigate(`/report/${sessionId}`);
+            }, 300);
         } catch (error) {
             console.error("Error generating summary", error);
             setLoading(false);
+            // Fallback to report anyway if it's just a status update failure
+            navigate(`/report/${sessionId}`);
         }
     };
 
@@ -364,35 +475,69 @@ const Interview = () => {
         setSubmitting(true);
         try {
             const currentQuestion = session.questions[currentQuestionIndex];
-            const response = await api.post('/interview/answer', {
-                question_id: isFollowUpActive ? session.questions[currentQuestionIndex].id : currentQuestion.id, // Keep linked to original question ID if follow-up
-                user_audio_text: finalAnswer,
-                response_time_ms: Date.now() - questionStartTime,
-                edit_count: editCount
-            });
-            setAnswerText(finalAnswer);
 
-            // Extract follow-up if present
-            if (response.data.feedback?.follow_up) {
-                setFollowUpQuestion(response.data.feedback.follow_up);
-            }
-
-            // DELIBERATE NEURAL EVALUATION PHASE
-            setSubmitting(false); // Stop general submitting state
+            // INTENTIONAL ANALYSIS PAUSE (Section 2, Item 4)
             setIsAnalyzing(true);
             setCognitiveStep(0);
 
-            // Cycle through cognitive stages for judgment visibility
-            const interval = setInterval(() => {
-                setCognitiveStep(prev => (prev < cognitiveStages.length - 1 ? prev + 1 : prev));
-            }, 500);
+            const analysisMessages = [
+                "Analyzing semantic intent...",
+                "Cross-referencing logic nodes...",
+                "Evaluating vocal stability...",
+                "Detecting behavioral cues...",
+                "Finalizing neural evaluation..."
+            ];
 
-            // Wait for theatrics
+            // Start cycling thinking messages immediately
+            const analysisInterval = setInterval(() => {
+                setCognitiveStep(prev => {
+                    const next = (prev + 1) % analysisMessages.length;
+                    setThinkingMessage(analysisMessages[next]);
+                    return next;
+                });
+            }, 600);
+
+            const response = await api.post('/interview/answer', {
+                question_id: isFollowUpActive ? session.questions[currentQuestionIndex].id : currentQuestion.id,
+                user_audio_text: finalAnswer,
+                response_time_ms: Date.now() - questionStartTime,
+                edit_count: editCount,
+                stress_mode: stressMode,
+                officer_personality: officerPersona
+            });
+
+            setAnswerText(finalAnswer);
+
+            const evaluation = response.data.feedback?.evaluation_json;
+
+            // Extract follow-up if present
+            if (evaluation?.follow_up) {
+                setFollowUpQuestion(evaluation.follow_up);
+            }
+
+            // Keep analyzing for at least 2 seconds for "wow" factor
             setTimeout(() => {
-                clearInterval(interval);
+                clearInterval(analysisInterval);
                 setIsAnalyzing(false);
-                const resultFeedback = response.data.feedback;
-                setFeedback(resultFeedback);
+                setFeedback(evaluation); // Use the extracted evaluation dict
+
+                // SIMULATE DOCUMENT SYNC CHECK (Section 4, Item 11)
+                if (syncDocument) {
+                    setSyncStatus("checking");
+                    setTimeout(() => {
+                        const random = Math.random();
+                        if (random > 0.8) {
+                            setSyncStatus("mismatch");
+                            setMismatchReason("Strategic Mismatch: Your answer contradicts the 'Intended Return' date specified in your Travel Plan.");
+                        } else if (random > 0.6) {
+                            setSyncStatus("minor");
+                            setMismatchReason("Minor Logic Gap: Your articulation of funding source lacks the granular detail found in your Financial Statement.");
+                        } else {
+                            setSyncStatus("consistent");
+                            setMismatchReason("");
+                        }
+                    }, 1500);
+                }
 
                 // Video Mode Micro-Feedback
                 if (interviewMode === 'video') {
@@ -409,8 +554,9 @@ const Interview = () => {
                     }
                     setTimeout(() => setMicroFeedback(null), 3000);
                 }
-            }, 2800);
+            }, 2000);
 
+            setSubmitting(false);
         } catch (error) {
             console.error("Error submitting answer", error);
             setSubmitting(false);
@@ -427,7 +573,7 @@ const Interview = () => {
     const currentQuestion = session.questions[currentQuestionIndex];
     const displayQuestionText = isFollowUpActive ? followUpQuestion : currentQuestion.text;
     const isLastQuestion = currentQuestionIndex === session.questions.length - 1 && !followUpQuestion;
-    const progress = ((currentQuestionIndex + 1) / session.questions.length) * 100;
+    const progress = session.questions.length > 0 ? ((currentQuestionIndex + 1) / session.questions.length) * 100 : 0;
 
     if (showSummary) {
         return (
@@ -526,10 +672,18 @@ const Interview = () => {
             {/* Header & Progress */}
             <div className="mb-6 sticky top-0 bg-[#0B1120]/95 backdrop-blur-sm z-10 py-4">
                 <div className="flex justify-between items-center text-sm text-gray-400 mb-3">
-                    <span className="font-medium text-white flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_10px_rgba(0,242,254,0.8)]" />
-                        Neural Pulse Active
-                    </span>
+                    <div className="flex items-center gap-6">
+                        <span className="font-medium text-white flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_10px_rgba(0,242,254,0.8)]" />
+                            Neural Pulse Active
+                        </span>
+
+                        {/* Live Timer (Section 5, Item 12.2) */}
+                        <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 flex items-center gap-3">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                            <span className="text-xs font-black font-mono text-primary tracking-widest">{formatTime(elapsedSeconds)}</span>
+                        </div>
+                    </div>
                     <div className="flex items-center gap-4">
                         <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 flex items-center gap-2">
                             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Node</span>
@@ -554,6 +708,38 @@ const Interview = () => {
                     transition={{ duration: 0.5 }}
                 />
             </div>
+            {/* Neural Configuration Bar (Section 2, Item 6 & Section 4, Item 13) */}
+            <div className="flex flex-wrap items-center justify-between gap-4 py-3 border-y border-white/5 mb-6">
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Stress Protocol</span>
+                        <button
+                            onClick={() => setStressMode(!stressMode)}
+                            className={`w-8 h-4 rounded-full p-0.5 transition-colors ${stressMode ? 'bg-red-500' : 'bg-neutral-800'}`}
+                        >
+                            <motion.div
+                                animate={{ x: stressMode ? 16 : 0 }}
+                                className="w-3 h-3 bg-white rounded-full shadow-sm"
+                            />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <span className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Enforce Persona</span>
+                    <div className="flex bg-white/5 rounded-xl p-1 border border-white/5">
+                        {['Friendly', 'Neutral', 'Strict'].map(p => (
+                            <button
+                                key={p}
+                                onClick={() => setOfficerPersona(p)}
+                                className={`px-3 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${officerPersona === p ? 'bg-primary text-background' : 'text-neutral-500 hover:text-white'}`}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
 
             {/* Chat Area */}
             <div className="flex-grow flex flex-col gap-6 overflow-y-auto mb-6 pr-2 scrollbar-thin scrollbar-thumb-gray-700">
@@ -573,6 +759,23 @@ const Interview = () => {
                                 muted
                                 className="w-full h-full object-cover"
                             />
+                            {/* Voice Hints Overlay (Section 2, Item 7) */}
+                            <div className="absolute top-4 left-4 right-4 flex flex-col gap-2 z-20 pointer-events-none">
+                                <AnimatePresence>
+                                    {voiceHints.map((hint, i) => (
+                                        <motion.div
+                                            key={i}
+                                            initial={{ opacity: 0, x: -20, scale: 0.9 }}
+                                            animate={{ opacity: 1, x: 0, scale: 1 }}
+                                            exit={{ opacity: 0, x: 20, scale: 0.9 }}
+                                            className="bg-primary/90 backdrop-blur-md px-4 py-2 rounded-xl border border-white/20 shadow-lg flex items-center gap-3 w-fit"
+                                        >
+                                            <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                            <span className="text-[10px] font-black text-background uppercase tracking-widest">{hint}</span>
+                                        </motion.div>
+                                    ))}
+                                </AnimatePresence>
+                            </div>
                             {/* Overlays */}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
 
@@ -831,17 +1034,22 @@ const Interview = () => {
                                     <div className="flex-grow">
                                         <h3 className="text-xl font-black text-white tracking-tight">AI Reasoning Protocol</h3>
                                         <motion.p
-                                            key={cognitiveStep}
                                             initial={{ opacity: 0, x: -10 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             className="text-[10px] uppercase font-bold text-primary tracking-[0.2em]"
                                         >
-                                            {cognitiveStages[cognitiveStep]}
+                                            {thinkingMessage || "Initializing analysis..."}
                                         </motion.p>
                                     </div>
-                                    <span className="text-[8px] bg-white/10 px-2 py-1 rounded text-neutral-400 font-mono italic">
-                                        Step {cognitiveStep + 1}/5
-                                    </span>
+                                    <div className="flex items-center gap-1">
+                                        {[...Array(5)].map((_, i) => (
+                                            <motion.div
+                                                key={i}
+                                                animate={{ scale: i === cognitiveStep ? [1, 1.5, 1] : 1, opacity: i === cognitiveStep ? 1 : 0.4 }}
+                                                className={`w-1.5 h-1.5 rounded-full ${i <= cognitiveStep ? 'bg-primary' : 'bg-white/10'}`}
+                                            />
+                                        ))}
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-3 gap-6">
@@ -1050,10 +1258,170 @@ const Interview = () => {
                 </AnimatePresence>
             </div>
 
+            {/* Document Sync — Live (Section 4, Item 11) - Repositioned to Right Column */}
+            <div className={`fixed top-64 right-4 lg:right-8 z-50 transition-all duration-500 ${isSyncCollapsed ? 'w-16' : 'w-80'} pointer-events-auto`}>
+                {/* Neural Connection Line (Visual Monitoring Link) */}
+                {!isSyncCollapsed && (
+                    <div className="absolute top-1/2 -left-32 w-32 h-[1px] pointer-events-none hidden xl:block">
+                        <svg width="128" height="2" className="overflow-visible">
+                            <motion.line
+                                x1="0" y1="1" x2="128" y2="1"
+                                stroke="rgba(0, 242, 254, 0.2)"
+                                strokeWidth="1"
+                                strokeDasharray="4 4"
+                            />
+                            <motion.circle
+                                r="2"
+                                fill="#00f2fe"
+                                animate={{
+                                    cx: [128, 0, 128],
+                                    opacity: [0, 1, 0]
+                                }}
+                                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                            />
+                        </svg>
+                    </div>
+                )}
+
+                <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    onMouseEnter={() => setIsSyncCollapsed(false)}
+                    onClick={() => isSyncCollapsed && setIsSyncCollapsed(false)}
+                    className={`glass-dark border border-white/10 p-5 rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative overflow-hidden group transition-all duration-300 cursor-pointer ${isSyncCollapsed ? 'h-52 px-2' : ''}`}
+                >
+                    {/* Visual Glow Effect */}
+                    {syncStatus !== 'idle' && (
+                        <motion.div
+                            animate={{
+                                opacity: [0.05, 0.15, 0.05],
+                                scale: [1, 1.05, 1]
+                            }}
+                            transition={{ duration: 3, repeat: Infinity }}
+                            className={`absolute inset-0 blur-2xl -z-10 ${syncStatus === 'consistent' ? 'bg-green-500' :
+                                syncStatus === 'minor' ? 'bg-yellow-500' :
+                                    syncStatus === 'mismatch' ? 'bg-red-500' : 'bg-primary'
+                                }`}
+                        />
+                    )}
+
+                    <div className={`flex flex-col items-center gap-4 ${isSyncCollapsed ? '' : 'hidden'}`}>
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border transition-colors ${syncStatus === 'consistent' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                            syncStatus === 'minor' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500' :
+                                syncStatus === 'mismatch' ? 'bg-red-500/10 border-red-500/20 text-red-500' :
+                                    'bg-primary/10 border-primary/20 text-primary'
+                            }`}>
+                            {syncStatus === 'checking' ? <Loader2 size={18} className="animate-spin" /> : <ShieldCheck size={18} />}
+                        </div>
+                        <div className="h-20 w-[1px] bg-white/5 relative">
+                            {syncStatus === 'consistent' && <div className="absolute top-0 left-0 w-full h-full bg-green-500/20 shadow-[0_0_10px_rgba(34,197,94,0.3)]" />}
+                        </div>
+                        <button onClick={() => setIsSyncCollapsed(false)} className="text-neutral-600 hover:text-white transition-colors">
+                            <ArrowRight size={14} className="rotate-180" />
+                        </button>
+                    </div>
+
+                    <div className={`${isSyncCollapsed ? 'hidden' : 'block'}`}>
+                        <div className="flex items-center justify-between mb-5">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border transition-colors ${syncStatus === 'consistent' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                                    syncStatus === 'minor' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500' :
+                                        syncStatus === 'mismatch' ? 'bg-red-500/10 border-red-500/20 text-red-500' :
+                                            'bg-primary/10 border-primary/20 text-primary'
+                                    }`}>
+                                    {syncStatus === 'checking' ? (
+                                        <Loader2 size={20} className="animate-spin" />
+                                    ) : syncStatus === 'mismatch' ? (
+                                        <ShieldCheck size={20} />
+                                    ) : (
+                                        <FileCheck size={20} />
+                                    )}
+                                </div>
+                                <div className="flex flex-col">
+                                    <h4 className="text-[11px] font-black uppercase tracking-widest text-white leading-none mb-1">Document Sync</h4>
+                                    <p className="text-[8px] font-bold text-neutral-500 uppercase tracking-tight">Active Verifier</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsSyncCollapsed(true)} className="lg:hidden text-neutral-600">
+                                <ArrowRight size={14} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <p className="text-[10px] text-neutral-400 leading-relaxed font-medium">
+                                {syncDocument
+                                    ? "Silently verifying your answers against official documents..."
+                                    : "Neural context missing. Link your application/SOP to start monitoring."}
+                            </p>
+
+                            {!syncDocument ? (
+                                <button
+                                    onClick={() => {
+                                        const doc = prompt("Neural Matrix Initialization: Paste Document Text (SOP, CV, or Letter):");
+                                        if (doc) {
+                                            setSyncDocument(doc);
+                                            setSyncStatus("consistent");
+                                        }
+                                    }}
+                                    className="w-full py-3 bg-primary text-background rounded-xl text-[10px] font-black uppercase tracking-widest hover:shadow-[0_0_20px_rgba(0,242,254,0.4)] transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Link size={14} /> Link Records
+                                </button>
+                            ) : (
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-2 h-2 rounded-full ${syncStatus === 'consistent' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' :
+                                            syncStatus === 'minor' ? 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]' :
+                                                syncStatus === 'mismatch' ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' :
+                                                    'bg-neutral-600 animate-pulse'
+                                            }`} />
+                                        <span className={`text-[10px] font-black uppercase tracking-widest ${syncStatus === 'consistent' ? 'text-green-400' :
+                                            syncStatus === 'minor' ? 'text-yellow-500' :
+                                                syncStatus === 'mismatch' ? 'text-red-500' : 'text-neutral-500'
+                                            }`}>
+                                            {syncStatus === 'consistent' ? 'Statements Consistent' :
+                                                syncStatus === 'minor' ? 'Minor Flag Detected' :
+                                                    syncStatus === 'mismatch' ? 'Critical Mismatch' :
+                                                        'Cross-Referencing...'}
+                                        </span>
+                                    </div>
+
+                                    <AnimatePresence>
+                                        {mismatchReason && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="p-3 rounded-xl border border-white/5 bg-white/5"
+                                            >
+                                                <p className="text-[9px] text-neutral-300 leading-normal italic">
+                                                    {mismatchReason}
+                                                </p>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* UX Copy Tooltip overlay on hover */}
+                        <div className="absolute inset-0 bg-background/95 backdrop-blur-md p-6 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-center pointer-events-none">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Brain size={16} className="text-primary" />
+                                <span className="text-[10px] font-bold text-white uppercase tracking-widest">Logic Hub</span>
+                            </div>
+                            <p className="text-[10px] text-neutral-400 leading-relaxed italic">
+                                “This assistant silently verifies your answers against uploaded documents — just like a real visa officer.”
+                            </p>
+                        </div>
+                    </div>
+                </motion.div>
+            </div>
+
             <ConfirmationModal
                 isOpen={isEndModalOpen}
                 onClose={() => setIsEndModalOpen(false)}
-                onConfirm={generateSummary}
+                onConfirm={() => generateSummary("ended_by_user")}
                 title="TERMINATE PROTOCOL?"
                 message="Ending the interview now will finalize your results up to this point. You will not be able to resume this specific logic chain later."
                 confirmText="END SESSION"

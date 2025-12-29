@@ -28,21 +28,22 @@ const Dashboard = () => {
                 setSessions(sessionData); // They come ordered by start_time asc/desc? Assuming we might need to sort.
 
                 // Calculate Stats
-                const completed = sessionData.filter(s => s.status === 'completed');
-                const avg = completed.length > 0
-                    ? Math.round(completed.reduce((acc, curr) => acc + (curr.score || 0), 0) / completed.length)
+                const finished = (sessionData || []).filter(s => s && ['completed', 'ended_by_user'].includes(s.status));
+                const finishedWithScores = finished.filter(s => s.score !== null && s.score !== undefined);
+                const avg = finishedWithScores.length > 0
+                    ? Math.round(finishedWithScores.reduce((acc, curr) => acc + (curr.score || 0), 0) / finishedWithScores.length)
                     : 0;
 
                 // Simple Weighted Readiness Logic: Avg Score * 0.7 + Completion Count * 5 (capped at 95)
-                let readiness = Math.min(96, Math.round(avg * 0.8 + (completed.length * 2)));
-                if (completed.length === 0) readiness = 10; // Baseline
+                let readiness = Math.min(96, Math.round(avg * 0.8 + (finished.length * 2)));
+                if (finished.length === 0) readiness = 10; // Baseline
 
                 // Recent Status
-                const lastSession = sessionData[sessionData.length - 1]; // Assuming appended last
-                const recentStatus = lastSession ? (lastSession.status === 'completed' ? 'Ready for Next' : 'In Progress') : 'Not Started';
+                const lastSession = sessionData && sessionData.length > 0 ? sessionData[0] : null;
+                const recentStatus = lastSession ? (['completed', 'ended_by_user'].includes(lastSession.status) ? 'Ready for Next' : 'In Progress') : 'Not Started';
 
                 setStats({
-                    completedCount: completed.length,
+                    completedCount: finished.length,
                     avgScore: avg,
                     readiness,
                     recentStatus
@@ -64,15 +65,16 @@ const Dashboard = () => {
         }
     };
 
-    // Sort sessions for display (newest first)
-    const sortedSessions = [...sessions].reverse();
+    // Sessions are already ordered by start_time DESC in the API
+    const sortedSessions = sessions;
 
-    const formatDuration = (start, end) => {
-        if (!end) return 'In Progress';
-        const durationMs = new Date(end) - new Date(start);
-        const minutes = Math.floor(durationMs / 60000);
-        const seconds = Math.floor((durationMs % 60000) / 1000);
-        return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    const formatDuration = (session) => {
+        if (session.status === 'in_progress') return 'Live Now';
+        const seconds = session.total_duration;
+        if (!seconds) return 'N/A';
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
     };
 
     return (
@@ -93,7 +95,7 @@ const Dashboard = () => {
                         {stats.recentStatus === 'In Progress' ? (
                             <>
                                 <PhysicsButton
-                                    onClick={() => navigate(`/interview/${sessions[sessions.length - 1].id}`)}
+                                    onClick={() => sessions?.[0] && navigate(`/interview/${sessions[0].id}`)}
                                     className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-4 rounded-2xl text-lg font-black transition-all shadow-xl shadow-orange-500/20 flex items-center gap-2"
                                 >
                                     <Smartphone size={22} /> RESUME PROTOCOL
@@ -134,8 +136,16 @@ const Dashboard = () => {
                         </ConfidencePulse>
                     </div>
 
-                    <p className={`text-[10px] font-black uppercase tracking-widest ${stats.readiness > 70 ? 'text-green-400' : 'text-yellow-400'}`}>
-                        {stats.readiness > 70 ? 'High probability link' : stats.readiness > 40 ? 'Calibrating...' : 'Weak Connectivity'}
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${stats.recentStatus === 'In Progress' ? 'text-primary animate-pulse' : stats.completedCount === 0 ? 'text-neutral-500' : stats.readiness > 70 ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {stats.recentStatus === 'In Progress'
+                            ? 'Active Assessment Synchronizing...'
+                            : stats.completedCount === 0
+                                ? 'Awaiting Interview Start'
+                                : stats.readiness > 70
+                                    ? 'High Approval Stability'
+                                    : stats.readiness > 40
+                                        ? 'Neural Calibration...'
+                                        : 'Insufficient Evidence'}
                     </p>
                 </GlassCard>
             </div>
@@ -171,22 +181,25 @@ const Dashboard = () => {
                         {sortedSessions.slice(0, 5).map(session => (
                             <div key={session.id} className="group bg-background p-4 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors flex justify-between items-center">
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${session.status === 'completed' ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400 animate-pulse'}`}>
-                                        {session.status === 'completed' ? <CheckCircle size={20} /> : <Play size={20} className="ml-1" />}
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${['completed', 'ended_by_user'].includes(session.status) ? 'bg-green-500/10 text-green-400' : 'bg-blue-500/10 text-blue-400 animate-pulse'}`}>
+                                        {['completed', 'ended_by_user'].includes(session.status) ? <CheckCircle size={20} /> : <Play size={20} className="ml-1" />}
                                     </div>
                                     <div>
                                         <span className="font-semibold block text-gray-200">
-                                            {session.status === 'completed' ? 'Practice Interview (Completed)' : 'Practice Interview (In Progress)'}
+                                            {session.status === 'completed' ? 'Practice Interview (Completed)' :
+                                                session.status === 'ended_by_user' ? 'Practice Interview (Manual Exit)' :
+                                                    session.status === 'interrupted' ? 'Practice Interview (Interrupted)' :
+                                                        'Practice Interview (Live)'}
                                         </span>
                                         <span className="text-sm text-gray-500">
                                             {new Date(session.start_time).toLocaleDateString()} • {new Date(session.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            {session.end_time && ` • Duration: ${formatDuration(session.start_time, session.end_time)}`}
+                                            {session.status !== 'in_progress' && ` • Duration: ${formatDuration(session)}`}
                                         </span>
                                     </div>
                                 </div>
 
                                 <div className="flex items-center gap-6">
-                                    {session.status === 'completed' ? (
+                                    {['completed', 'ended_by_user'].includes(session.status) ? (
                                         <>
                                             <div className="text-right">
                                                 <span className="block text-xs text-gray-400 uppercase">Score</span>
